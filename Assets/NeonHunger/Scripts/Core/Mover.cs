@@ -17,6 +17,9 @@ namespace NeonHunger.Core
         public float BufferedAt = -99f;
         /// <summary>How long (seconds) a pressed direction is remembered while waiting for an opening.</summary>
         public float BufferWindow = 0.32f;
+        /// <summary>Cornering slack (tiles): a turn pressed this close to a junction's centre, just
+        /// before or just after it, snaps onto the centre-line and is taken at once.</summary>
+        public float Corner;
 
         public Tile Tile => new Tile((int)Math.Round(X), (int)Math.Round(Y));
         public bool AtCentre => Math.Abs(X - Math.Round(X)) < 1e-4 && Math.Abs(Y - Math.Round(Y)) < 1e-4;
@@ -71,6 +74,11 @@ namespace NeonHunger.Core
                     Snap();
                     Dir = Buffered; Facing = Dir; Buffered = Dir.None;
                 }
+                else if (buffered && Corner > 0f && Dir != Dir.None && Buffered != Dir && !AtCentre && OffCentre() <= Corner && canEnter(Tile.Step(Buffered)))
+                {
+                    Snap();   // Tile is the nearest centre, so this is a tiny hop onto the junction
+                    Dir = Buffered; Facing = Dir; Buffered = Dir.None;
+                }
                 if (Dir == Dir.None) break;
                 if (AtCentre && !canEnter(Tile.Step(Dir))) { Snap(); Dir = Dir.None; break; }
 
@@ -89,6 +97,8 @@ namespace NeonHunger.Core
             }
             return moved;
         }
+
+        float OffCentre() => Dir.Horizontal() ? Math.Abs(X - (float)Math.Round(X)) : Math.Abs(Y - (float)Math.Round(Y));
 
         void Snap() { X = (float)Math.Round(X); Y = (float)Math.Round(Y); }
 

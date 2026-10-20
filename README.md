@@ -21,6 +21,7 @@ There is a [public scoreboard](#public-scoreboard) for your best run. Developed 
 |---|---|
 | ![Power surge](docs/screenshots/06_power_surge.jpg) | ![Living walls about to move](docs/screenshots/07_walls_warning.jpg) |
 | ![Risk chamber](docs/screenshots/08_risk_room.jpg) | ![Title](docs/screenshots/01_title.jpg) |
+| ![A GO HOME pill](docs/screenshots/14_pill.jpg) | ![Every hunter sent home](docs/screenshots/17_go_home.jpg) |
 | ![The creature](docs/screenshots/12_closeup_player.jpg) | ![The Ambusher](docs/screenshots/13_closeup_ambusher.jpg) |
 
 The screenshots come from automated test runs of the real game: the Linux build and the browser build in headless Chromium. Those runs use software rendering, so they show exactly what the game draws, but not how smoothly it runs on a graphics card.
@@ -34,7 +35,7 @@ The screenshots come from automated test runs of the real game: the Linux build 
 | Pause | Esc or P | Start | II button |
 | Restart run | R | Select | (pause menu) |
 
-- **Turns are buffered.** Press a direction just before a junction and it's taken the moment you reach it, so cornering is reliable.
+- **Turns are forgiving.** A pressed direction is remembered for 0.8 s (about four tiles), so you can press early and take the next opening. A turn pressed up to 0.3 of a tile before or after a junction's centre is also taken immediately.
 - **Dash** is a short burst of speed with a cooldown (the meter at bottom left). It's **loud**: hunters nearby turn to look, and the Listener comes from anywhere in the maze.
 - **Energy nodes** (cyan) must all be eaten. The **EXIT** then opens in the outer wall; reach it to clear the level.
 - **Power surge.** A rare violet core turns the chase around for a few seconds.
@@ -51,6 +52,16 @@ The screenshots come from automated test runs of the real game: the Linux build 
   - Still inside when it reaches zero, and the chamber purges, costing a life.
   - The door never closes on top of you, and nothing you need to finish the level is ever inside one.
 - **Gems** (crimson, 300) sit in exposed spots near the hunters.
+- **Bonus pills** appear one at a time at a random safe spot: the first after 10 s, then one 16 s after the previous pill is taken or fades. Each lasts 15 s and blinks before it fades. They score nothing, but they help:
+
+  | Pill | Effect |
+  |---|---|
+  | **GO HOME** (green) | Every hunter out in the maze races back to the pen as a pair of eyes and stays there for 10 s. Hunters still in the pen stay there too. |
+  | **FREEZE** (ice blue) | The hunters are frozen solid for 6 s. Touching a frozen hunter is safe. |
+  | **SPEED** (yellow) | You move 35% faster for 8 s. |
+  | **SHIELD** (pink) | The next hunter to catch you is sent back to the pen instead. It lasts until it's used, or until you lose a life. |
+
+  A timer bar for each active pill is shown at the bottom of the screen.
 
 You have 3 lives and gain one extra life at 10,000 points. Your settings and personal best are saved on your device.
 
@@ -140,7 +151,7 @@ Assets/NeonHunger/
   Scripts/Audio  Sfx (synthesised audio)
   Scripts/Net    Scoreboard client
   Editor/        NeonBuilder (project, pipelines, materials, scene, builds), TextureKit
-  Tests/EditMode CoreTests (29 tests)
+  Tests/EditMode CoreTests (37 tests)
 server/          neon-scores.php (public scoreboard)
 docs/            the deployed browser build (committed; see below) and README screenshots
 ci/              optional custom GitHub Pages workflow
@@ -178,7 +189,7 @@ The scripts expect the editor at `~/Unity/Hub/Editor/6000.6.3f1/Editor/Unity`; s
 
 All automated runs are GPU-free (software rendering) and muted. No real gamepad or real phone was used.
 
-1. **Core rules: 29 tests, all passing.** They run in Unity's EditMode runner (and in .NET during development). They cover:
+1. **Core rules: 37 tests, all passing.** They run in Unity's EditMode runner (and in .NET during development). They cover:
    - every level parsing correctly;
    - every node and the exit being reachable **in every possible living-wall configuration**;
    - risk rooms being sealed except for the door, and holding no required nodes;
@@ -195,7 +206,12 @@ All automated runs are GPU-free (software rendering) and muted. No real gamepad 
    - level clear and its bonus;
    - the dash cooldown and its noise;
    - the score equalling the sum of its events, and the scoreboard encoding;
-   - the bot clearing every level.
+   - the bot clearing every level;
+   - the cornering slack (a turn pressed just past a junction is taken; with no slack it's missed), and the player's 0.8 s turn memory;
+   - the GO HOME pill sending every hunter home and holding them there, including ones not yet released, then letting them out after 10 s;
+   - FREEZE stopping the hunters and making them harmless until it thaws;
+   - SPEED's 35% boost, and SHIELD taking exactly one catch;
+   - pills only appearing on open floor that the player can reach, never in a risk room or on a living wall, and each one being taken or fading.
 2. **Input test of the Linux build: 14 of 14 checks pass.** It uses virtual keyboard and gamepad devices to test:
    - title focus, and Enter starting a run;
    - held keys moving the creature;

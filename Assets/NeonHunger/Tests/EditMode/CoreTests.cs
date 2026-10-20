@@ -562,4 +562,183 @@ namespace NeonHunger.Tests
             }
         }
     }
+    public class PowerUpTests
+    {
+        static readonly string[] Cross = { "#######", "###.###", "#S....#", "###.###", "###-###", "##HHH##", "###E###" };
+
+        static void Tick(GameSim s, float seconds, PlayerInput input = default, List<SimEvent> log = null)
+        {
+            for (float t = 0; t < seconds; t += 1f / 60f)
+            {
+                s.Tick(1f / 60f, input);
+                log?.AddRange(s.Events);
+                s.Events.Clear();
+            }
+        }
+
+        static GameSim Playing(int level = 0)
+        {
+            var s = new GameSim(LevelDef.All[level], new RunScore { Lives = 9 }, 3);
+            Tick(s, GameSim.ReadyTime + 0.05f);
+            Assert.AreEqual(SimState.Playing, s.State);
+            return s;
+        }
+
+        /// <summary>Send every hunter out into the maze, a few tiles from the player.</summary>
+        static void AllOut(GameSim s)
+        {
+            foreach (var h in s.Hunters) { h.Mover.Place(s.GateOut, Dir.Left); h.SetMode(HunterMode.Hunting); }
+        }
+
+        static void Take(GameSim s, PowerUp kind, List<SimEvent> log = null)
+        {
+            Assert.IsTrue(s.SpawnPickup(kind, s.Player.Tile));
+            Tick(s, 1f / 60f, default, log);
+            Assert.AreEqual(PowerUp.None, s.Pickup, "picked up");
+        }
+
+        [Test] public void ATurnPressedJustPastAJunctionStillTurns()
+        {
+            var m = Maze.Parse(Cross);
+            foreach (var corner in new[] { 0f, GameSim.PlayerCorner })
+            {
+                var mv = new Mover { Corner = corner };
+                mv.Place(m.Start);
+                mv.Want(Dir.Right, 0f);
+                float t = 0f;
+                for (int i = 0; i < 14; i++) { mv.Step(0.1f, 1.5f, m.PlayerCanEnter, t); t += 0.1f; }   // x = 3.1: just past the junction at 3
+                Assert.AreEqual(3.1f, mv.X, 1e-3);
+                mv.Want(Dir.Up, t);
+                mv.Step(0.05f, 1.5f, m.PlayerCanEnter, t);
+                if (corner > 0f) { Assert.AreEqual(Dir.Up, mv.Dir, "late turn forgiven"); Assert.AreEqual(3f, mv.X, 1e-4, "on the centre-line"); }
+                else Assert.AreEqual(Dir.Right, mv.Dir, "no slack: the junction was missed");
+            }
+        }
+
+        [Test] public void ThePlayerRemembersATurnForMostOfASecond()
+        {
+            var s = Playing();
+            Assert.AreEqual(GameSim.PlayerBufferWindow, s.Player.BufferWindow);
+            Assert.GreaterOrEqual(s.Player.BufferWindow * s.Def.PlayerSpeed, 4f, "about four tiles of warning");
+        }
+
+        [Test] public void TheHomePillSendsEveryoneHomeForTenSeconds()
+        {
+            var s = Playing();
+            AllOut(s);
+            Tick(s, 0.5f);
+            var log = new List<SimEvent>();
+            Take(s, PowerUp.Home, log);
+            Assert.IsTrue(log.Any(e => e.Kind == SimEventKind.PickupTaken && e.Value == (int)PowerUp.Home));
+            Assert.AreEqual(GameSim.HomeSeconds, s.HomeLeft, 0.05f);
+            foreach (var h in s.Hunters) Assert.AreEqual(HunterMode.Returning, h.Mode, h.Kind.ToString());
+            // they reach the pen and stay there; nobody can catch the player
+            Tick(s, GameSim.HomeSeconds - 0.3f, default, log);
+            foreach (var h in s.Hunters)
+            {
+                Assert.AreEqual(HunterMode.Recovering, h.Mode, h.Kind + " waits at home");
+                Assert.IsTrue(h.OnPenSide(s.Maze), h.Kind + " is in the pen");
+            }
+            Assert.IsFalse(log.Any(e => e.Kind == SimEventKind.PlayerCaught));
+            Assert.IsTrue(log.Any(e => e.Kind == SimEventKind.PowerUpEnding && e.Value == (int)PowerUp.Home), "warned before it ends");
+            Tick(s, 0.6f, default, log);
+            Assert.IsTrue(log.Any(e => e.Kind == SimEventKind.PowerUpEnd && e.Value == (int)PowerUp.Home));
+            Assert.IsTrue(s.Hunters.All(h => h.Mode == HunterMode.Leaving), "back out when it wears off");
+        }
+
+        [Test] public void TheHomePillHoldsHuntersThatHaventLeftYet()
+        {
+            var s = Playing();
+            Take(s, PowerUp.Home);
+            Tick(s, GameSim.HomeSeconds - 0.5f);
+            Assert.IsTrue(s.Hunters.All(h => h.Mode == HunterMode.Penned), "release waits");
+            Tick(s, 1f);
+            Assert.IsTrue(s.Hunters.Any(h => h.Mode != HunterMode.Penned), "release resumes");
+        }
+
+        [Test] public void FreezeStopsHuntersAndMakesThemHarmless()
+        {
+            var s = Playing();
+            AllOut(s);
+            Tick(s, 0.5f);
+            Take(s, PowerUp.Freeze);
+            var where = s.Hunters.Select(h => (h.Mover.X, h.Mover.Y)).ToArray();
+            var log = new List<SimEvent>();
+            // stand a hunter right on the player: frozen, it does nothing
+            s.Hunters[0].Mover.Place(s.Player.Tile);
+            where[0] = (s.Hunters[0].Mover.X, s.Hunters[0].Mover.Y);
+            Tick(s, GameSim.FreezeSeconds - 0.5f, default, log);
+            for (int i = 0; i < 4; i++) Assert.AreEqual(where[i], (s.Hunters[i].Mover.X, s.Hunters[i].Mover.Y), "frozen in place");
+            Assert.IsTrue(s.IsFrozen(s.Hunters[1]));
+            Assert.IsFalse(log.Any(e => e.Kind == SimEventKind.PlayerCaught), "touching a frozen hunter is safe");
+            Tick(s, 1f, default, log);
+            Assert.IsFalse(s.IsFrozen(s.Hunters[1]));
+            Assert.IsTrue(log.Any(e => e.Kind == SimEventKind.PlayerCaught), "thawed, it catches the player");
+        }
+
+        [Test] public void SpeedMakesThePlayerFasterForAWhile()
+        {
+            var s = Playing();
+            foreach (var h in s.Hunters) h.ReleaseAt = 9999f;
+            var input = new PlayerInput { Want = Dir.Left };
+            float x0 = s.Player.X; Tick(s, 0.3f, input); float normal = Math.Abs(s.Player.X - x0);
+            s.Player.Place(s.Maze.Start);
+            Take(s, PowerUp.Speed);
+            x0 = s.Player.X; Tick(s, 0.3f, input); float fast = Math.Abs(s.Player.X - x0);
+            Assert.AreEqual(GameSim.SpeedBoost, fast / normal, 0.08f);
+            Tick(s, GameSim.SpeedSeconds);
+            Assert.AreEqual(0f, s.SpeedLeft);
+        }
+
+        [Test] public void TheShieldTakesOneHitAndSendsTheHunterHome()
+        {
+            var s = Playing();
+            AllOut(s);
+            foreach (var h in s.Hunters.Skip(1)) { h.SetMode(HunterMode.Penned); h.ReleaseAt = 9999f; h.Mover.Place(h.PenSpot); }
+            Take(s, PowerUp.Shield);
+            Assert.IsTrue(s.Shielded);
+            var log = new List<SimEvent>();
+            s.Hunters[0].Mover.Place(s.Player.Tile);
+            Tick(s, 1f / 60f, default, log);
+            Assert.IsTrue(log.Any(e => e.Kind == SimEventKind.ShieldBlock && e.Hunter == 0));
+            Assert.IsFalse(log.Any(e => e.Kind == SimEventKind.PlayerCaught));
+            Assert.IsFalse(s.Shielded, "used up");
+            Assert.AreEqual(HunterMode.Returning, s.Hunters[0].Mode);
+            s.Hunters[0].SetMode(HunterMode.Hunting);
+            s.Hunters[0].Mover.Place(s.Player.Tile);
+            Tick(s, 1f / 60f, default, log);
+            Assert.IsTrue(log.Any(e => e.Kind == SimEventKind.PlayerCaught), "the second hit counts");
+        }
+
+        [Test] public void PickupsAppearOnlyInSafeReachableSpotsAndExpire()
+        {
+            foreach (var def in LevelDef.All)
+            {
+                var s = new GameSim(def, new RunScore { Lives = 99 }, 5);
+                var bot = new AutoPilot(5);
+                int spawned = 0, expiredOrTaken = 0;
+                for (int f = 0; f < 60 * 240 && s.State != SimState.GameOver && s.State != SimState.Cleared; f++)
+                {
+                    s.Tick(1f / 60f, bot.Think(s));
+                    foreach (var e in s.Events)
+                    {
+                        if (e.Kind == SimEventKind.PickupSpawned)
+                        {
+                            spawned++;
+                            var t = e.Tile;
+                            Assert.IsTrue(s.Maze.PlayerCanEnter(t) && s.Maze.HunterCanEnter(t, false), $"{def.Name} {t} is open floor");
+                            Assert.IsNull(s.Maze.RoomOf(t), $"{def.Name} {t} not in a risk room");
+                            Assert.IsNull(s.Maze.GroupAt(t), $"{def.Name} {t} not on a living wall");
+                            Assert.GreaterOrEqual(s.Maze.Dist(s.Maze.Distances(s.Player.Tile, s.Maze.PlayerCanEnter), t), 6, "reachable, not on top of the player");
+                        }
+                        if (e.Kind == SimEventKind.PickupExpired || e.Kind == SimEventKind.PickupTaken) expiredOrTaken++;
+                    }
+                    s.Events.Clear();
+                }
+                TestContext.Progress.WriteLine($"{def.Name}: {spawned} pickups, {expiredOrTaken} taken or expired");
+                Assert.GreaterOrEqual(spawned, 2, def.Name);
+                Assert.GreaterOrEqual(expiredOrTaken, spawned - 1, "each pickup is taken or expires");
+            }
+        }
+    }
 }

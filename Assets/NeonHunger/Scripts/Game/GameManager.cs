@@ -42,6 +42,7 @@ namespace NeonHunger
         MazeView mazeView;
         PlayerView player;
         HunterView[] hunters;
+        PickupView pickup;
         ParticleSystem burst;
         readonly HashSet<string> hints = new HashSet<string>();
         int attractLevel;
@@ -119,6 +120,9 @@ namespace NeonHunger
                 hunters[i] = new GameObject(Sim.Hunters[i].Kind.ToString()).AddComponent<HunterView>();
                 hunters[i].Build(Sim.Hunters[i].Kind, Art, Settings.Quality);
             }
+            if (pickup) Destroy(pickup.gameObject);
+            pickup = new GameObject("Pickup").AddComponent<PickupView>();
+            pickup.Build(Art);
             var m = Sim.Maze;
             Rig.MinXZ = new Vector2(3f, -(m.Height - 1) + 1.5f);
             Rig.MaxXZ = new Vector2(m.Width - 4f, -2.5f);
@@ -204,6 +208,7 @@ namespace NeonHunger
         {
             player.Sync(Sim, dt);
             for (int i = 0; i < hunters.Length; i++) hunters[i].Sync(Sim, i, dt);
+            pickup.Sync(Sim);
             Rig.Target = Art.World(Sim.Player.X, Sim.Player.Y);
             var d = Sim.Player.Dir;
             Rig.LookDir = Vector3.Lerp(Rig.LookDir, new Vector3(d.DC(), 0, -d.DR()), 1f - Mathf.Exp(-dt * 3f));
@@ -268,6 +273,31 @@ namespace NeonHunger
                     break;
                 case SimEventKind.Shift: mazeView.ApplyShift(Sim.Maze.Groups[e.Value]); if (live) { Sfx.Play(Sfx.Kind.ShiftMove); Rig.Shake(0.2f); } break;
                 case SimEventKind.ShiftCancelled: mazeView.Telegraph(null); break;
+                case SimEventKind.PickupSpawned:
+                    if (live) { Sfx.Play(Sfx.Kind.Ready, 0.5f, 1.4f); Hint("pickup", "A bonus pill has appeared! Grab it before it fades.", 4f); }
+                    break;
+                case SimEventKind.PickupTaken:
+                {
+                    var kind = (PowerUp)e.Value;
+                    Burst(at, PickupView.Colour(kind), 45);
+                    if (live)
+                    {
+                        Sfx.Play(Sfx.Kind.Power, 1f, kind == PowerUp.Speed ? 1.35f : kind == PowerUp.Freeze ? 0.8f : 1.15f);
+                        Ui.Popup(at, PickupView.Name(kind), PickupView.Colour(kind));
+                        Ui.Hint(PickupView.Blurb(kind), 3.5f);
+                        Rig.Shake(0.2f);
+                    }
+                    break;
+                }
+                case SimEventKind.PowerUpEnding: if (live) Sfx.Play(Sfx.Kind.SurgeEnding, 0.6f, 1.2f); break;
+                case SimEventKind.ShieldBlock:
+                {
+                    var h = Sim.Hunters[e.Hunter];
+                    var pos = Art.World(h.Mover.X, h.Mover.Y, 0.6f);
+                    Burst(pos, PickupView.Colour(PowerUp.Shield), 60);
+                    if (live) { Sfx.Play(Sfx.Kind.DoorSlam); Ui.Popup(pos, "BLOCKED!", PickupView.Colour(PowerUp.Shield)); Rig.Shake(0.5f); }
+                    break;
+                }
                 case SimEventKind.RiskEntered: if (live) { Sfx.Play(Sfx.Kind.RiskAlarm); Hint("riskIn", $"The door seals in {e.Value} seconds. Grab the bonus and get out!", 3.5f, true); } break;
                 case SimEventKind.RiskWarning: if (live) Sfx.Play(Sfx.Kind.RiskAlarm, 1f, 1.3f); break;
                 case SimEventKind.RiskSealed:

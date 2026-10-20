@@ -5,6 +5,9 @@ namespace NeonHunger.Core
 {
     public enum SimState { Ready, Playing, Dying, Cleared, GameOver }
 
+    /// <summary>Bonus pickups that appear in the maze for a while (they score nothing; they help).</summary>
+    public enum PowerUp : byte { None, Home, Freeze, Speed, Shield }
+
     public enum SimEventKind
     {
         Node, Power, Gem, RiskGem, ExitOpen, LevelCleared,
@@ -12,13 +15,14 @@ namespace NeonHunger.Core
         PlayerCaught, Respawn, GameOver, ExtraLife, Dash,
         ShiftWarning, Shift, ShiftCancelled,
         RiskEntered, RiskWarning, RiskSealed,
+        PickupSpawned, PickupExpired, PickupTaken, PowerUpEnding, PowerUpEnd, ShieldBlock,
     }
 
     public struct SimEvent
     {
         public SimEventKind Kind;
         public Tile Tile;
-        public int Value;      // points, combo index, group index…
+        public int Value;      // points, combo index, group index, PowerUp…
         public int Hunter;     // hunter index, -1 if none
         public bool Flag;      // RiskSealed: player trapped
         public override string ToString() => $"{Kind} {Tile} v={Value} h={Hunter}{(Flag ? " !" : "")}";
@@ -72,6 +76,22 @@ namespace NeonHunger.Core
         public float ShiftTimer { get; private set; }
         int shiftCursor, shiftRetries;
 
+        // bonus pickups: one at a time, at a random safe spot, for a limited time
+        public const float HomeSeconds = 10f, FreezeSeconds = 6f, SpeedSeconds = 8f, SpeedBoost = 1.35f;
+        public const float PickupLife = 15f, FirstPickup = 10f, PickupEvery = 16f, PowerUpWarn = 2f;
+        public PowerUp Pickup { get; private set; }
+        public Tile PickupTile { get; private set; }
+        public float PickupLeft { get; private set; }
+        public float PickupTimer { get; private set; } = FirstPickup;
+        PowerUp lastPickup;
+        public float HomeLeft { get; private set; }
+        public float FreezeLeft { get; private set; }
+        public float SpeedLeft { get; private set; }
+        public bool Shielded { get; private set; }
+        /// <summary>Hunters out in the maze stand frozen solid (and harmless) while a freeze lasts.</summary>
+        public bool IsFrozen(Hunter h) => FreezeLeft > 0f && (h.Mode == HunterMode.Hunting || h.Mode == HunterMode.Fleeing || h.Mode == HunterMode.Leaving);
+
+        public const float PlayerBufferWindow = 0.8f, PlayerCorner = 0.3f;
         public const float ReadyTime = 1.6f, DyingTime = 1.7f, CatchRadius = 0.62f;
         float playSince;   // Clock value when the current life started (for hunter release)
         readonly Random rng;
@@ -93,6 +113,9 @@ namespace NeonHunger.Core
             spots.Sort((a, b) => a.Manhattan(Maze.PenCentre).CompareTo(b.Manhattan(Maze.PenCentre)));
             for (int i = 0; i < Hunters.Length; i++) Hunters[i].PenSpot = spots[Math.Min(i, spots.Count - 1)];
             ShiftTimer = def.FirstShift;
+            // the player's turns are forgiving: remembered for a while, and taken slightly early or late
+            Player.BufferWindow = PlayerBufferWindow;
+            Player.Corner = PlayerCorner;
             ResetActors();
         }
 
@@ -119,6 +142,7 @@ namespace NeonHunger.Core
             }
             SurgeLeft = 0f; combo = 0;
             DashLeft = 0f; DashCooldownLeft = 0f;
+            HomeLeft = FreezeLeft = SpeedLeft = 0f; Shielded = false;
             playSince = Clock;
             State = SimState.Ready; StateTime = 0f;
         }
@@ -156,6 +180,7 @@ namespace NeonHunger.Core
             UpdatePlayer(dt, input);
             if (State != SimState.Playing) return;
             UpdateSurge(dt);
+            UpdatePowerUps(dt);
             for (int i = 0; i < Hunters.Length; i++) UpdateHunter(i, dt);
             CheckContacts();
             if (State != SimState.Playing) return;
@@ -178,7 +203,7 @@ namespace NeonHunger.Core
                 Emit(SimEventKind.Dash, Player.Tile);
                 MakeNoise(Player.Tile);
             }
-            float speed = Def.PlayerSpeed * (Dashing ? DashBoost : 1f) * (SurgeActive ? 1.05f : 1f);
+            float speed = Def.PlayerSpeed * (Dashing ? DashBoost : 1f) * (SurgeActive ? 1.05f : 1f) * (SpeedLeft > 0f ? SpeedBoost : 1f);
             DashLeft = Math.Max(0f, DashLeft - dt);
             Player.Step(dt, speed, Maze.PlayerCanEnter, Now);
 
@@ -194,6 +219,7 @@ namespace NeonHunger.Core
                 case Item.Gem: Stats.Gems++; Emit(SimEventKind.Gem, tile, Points.Gem); break;
                 case Item.RiskGem: Stats.RiskGems++; Emit(SimEventKind.RiskGem, tile, Points.RiskGem); break;
             }
+            if (Pickup != PowerUp.None && tile == PickupTile) TakePickup();
             if (Maze.ExitOpen && tile == Maze.Exit)
             {
                 Stats.Cleared = true;
@@ -254,6 +280,7 @@ namespace NeonHunger.Core
         public float HunterSpeed(int i)
         {
             var h = Hunters[i];
+            if (IsFrozen(h)) return 0f;
             switch (h.Mode)
             {
                 case HunterMode.Penned: case HunterMode.Recovering: return 0f;
@@ -279,10 +306,10 @@ namespace NeonHunger.Core
             switch (h.Mode)
             {
                 case HunterMode.Penned:
-                    if (Clock - playSince >= h.ReleaseAt) { h.SetMode(HunterMode.Leaving); Emit(SimEventKind.HunterReleased, h.Mover.Tile, 0, i); }
+                    if (Clock - playSince >= h.ReleaseAt && HomeLeft <= 0f) { h.SetMode(HunterMode.Leaving); Emit(SimEventKind.HunterReleased, h.Mover.Tile, 0, i); }
                     return;
                 case HunterMode.Recovering:
-                    if (h.ModeTime >= 2.5f) h.SetMode(HunterMode.Leaving);
+                    if (h.ModeTime >= 2.5f && HomeLeft <= 0f) h.SetMode(HunterMode.Leaving);
                     return;
             }
 
@@ -358,6 +385,90 @@ namespace NeonHunger.Core
             return HunterBrain.Choose(Maze, at, current, field, canEnter, flee, rng);
         }
 
+        // ================================================================== bonus pickups
+
+        void UpdatePowerUps(float dt)
+        {
+            HomeLeft = CountDown(HomeLeft, dt, PowerUp.Home);
+            FreezeLeft = CountDown(FreezeLeft, dt, PowerUp.Freeze);
+            SpeedLeft = CountDown(SpeedLeft, dt, PowerUp.Speed);
+            if (Pickup != PowerUp.None)
+            {
+                PickupLeft -= dt;
+                if (PickupLeft <= 0f) { Emit(SimEventKind.PickupExpired, PickupTile, (int)Pickup); Pickup = PowerUp.None; PickupTimer = PickupEvery; }
+                return;
+            }
+            PickupTimer -= dt;
+            if (PickupTimer > 0f) return;
+            var kind = (PowerUp)(1 + rng.Next(4));
+            if (kind == lastPickup) kind = (PowerUp)(1 + ((int)kind % 4));
+            if (!SpawnPickup(kind)) PickupTimer = 2f;   // nowhere safe right now: try again soon
+        }
+
+        float CountDown(float left, float dt, PowerUp kind)
+        {
+            if (left <= 0f) return 0f;
+            float now = left - dt;
+            if (left > PowerUpWarn && now <= PowerUpWarn) Emit(SimEventKind.PowerUpEnding, Player.Tile, (int)kind);
+            if (now <= 0f) { Emit(SimEventKind.PowerUpEnd, Player.Tile, (int)kind); return 0f; }
+            return now;
+        }
+
+        /// <summary>Place a pickup at a random safe spot (or `at`, for tests). False if there's nowhere suitable.</summary>
+        public bool SpawnPickup(PowerUp kind, Tile? at = null)
+        {
+            Tile spot;
+            if (at.HasValue) spot = at.Value;
+            else if (!FindPickupSpot(out spot)) return false;
+            Pickup = kind; PickupTile = spot; PickupLeft = PickupLife; lastPickup = kind;
+            Emit(SimEventKind.PickupSpawned, spot, (int)kind);
+            return true;
+        }
+
+        /// <summary>
+        /// A tile both the player and hunters can stand on (so never inside a risk room, the pen or the
+        /// exit), away from moving walls and items, that the player can reach and isn't right next to.
+        /// </summary>
+        bool FindPickupSpot(out Tile spot)
+        {
+            var field = Maze.Distances(Player.Tile, Maze.PlayerCanEnter, scratchB);
+            var options = new List<Tile>();
+            for (int pass = 0; pass < 2 && options.Count == 0; pass++)
+                for (int r = 0; r < Maze.Height; r++)
+                    for (int c = 0; c < Maze.Width; c++)
+                    {
+                        var t = new Tile(c, r);
+                        if (!Maze.HunterCanEnter(t, false) || !Maze.PlayerCanEnter(t) || Maze.GroupAt(t) != null) continue;
+                        if (pass == 0 && Maze.ItemAt(t) != Item.None) continue;   // prefer already-eaten floor
+                        int d = Maze.Dist(field, t);
+                        if (d < 6) continue;
+                        options.Add(t);
+                    }
+            spot = options.Count > 0 ? options[rng.Next(options.Count)] : default;
+            return options.Count > 0;
+        }
+
+        void TakePickup()
+        {
+            var kind = Pickup;
+            Pickup = PowerUp.None;
+            PickupTimer = PickupEvery;
+            switch (kind)
+            {
+                case PowerUp.Home:
+                    HomeLeft = HomeSeconds;
+                    // everyone out in the maze races back to the pen and stays there until it wears off
+                    foreach (var h in Hunters)
+                        if (h.Mode == HunterMode.Hunting || h.Mode == HunterMode.Fleeing || h.Mode == HunterMode.Leaving)
+                        { h.NoiseLeft = 0f; h.SetMode(HunterMode.Returning); }
+                    break;
+                case PowerUp.Freeze: FreezeLeft = FreezeSeconds; break;
+                case PowerUp.Speed: SpeedLeft = SpeedSeconds; break;
+                case PowerUp.Shield: Shielded = true; break;
+            }
+            Emit(SimEventKind.PickupTaken, Player.Tile, (int)kind);
+        }
+
         // ================================================================== contacts
 
         void CheckContacts()
@@ -365,7 +476,7 @@ namespace NeonHunger.Core
             for (int i = 0; i < Hunters.Length; i++)
             {
                 var h = Hunters[i];
-                if (Player.DistanceTo(h.Mover) > CatchRadius) continue;
+                if (Player.DistanceTo(h.Mover) > CatchRadius || IsFrozen(h)) continue;
                 if (h.Mode == HunterMode.Fleeing)
                 {
                     int pts = Points.Hunter(combo);
@@ -378,6 +489,15 @@ namespace NeonHunger.Core
                 }
                 else if (h.Mode == HunterMode.Hunting || (h.Mode == HunterMode.Leaving && !h.OnPenSide(Maze)))
                 {
+                    if (Shielded)
+                    {
+                        // the shield takes the hit and throws the hunter all the way home
+                        Shielded = false;
+                        h.NoiseLeft = 0f;
+                        h.SetMode(HunterMode.Returning);
+                        Emit(SimEventKind.ShieldBlock, h.Mover.Tile, 0, i);
+                        continue;
+                    }
                     Die(i);
                     return;
                 }

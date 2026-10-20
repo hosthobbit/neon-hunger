@@ -33,6 +33,7 @@ namespace NeonHunger
         Text scoreText, bestText, levelText, nodesText, hintText, introTitle, introSub, surgeText;
         Image dashFill, surgeFill, hintBack;
         RectTransform livesRow, surgeBar, popupLayer, threatLayer;
+        readonly List<(PowerUp kind, RectTransform bar, Image fill, Text label)> powerBars = new List<(PowerUp, RectTransform, Image, Text)>();
         CanvasGroup hintGroup, introGroup;
         readonly List<Image> lifeIcons = new List<Image>();
         readonly List<Image> threats = new List<Image>();
@@ -234,15 +235,16 @@ namespace NeonHunger
             var body = OpenModal("Controls", 1300, 900);
             var t = UiKit.Label(body,
                 "<b>Steer</b>   WASD or arrow keys · gamepad stick / d-pad · <b>swipe</b> on touch screens\n" +
-                "Turns are remembered for a moment, so press just before a junction.\n\n" +
+                "Turns are remembered, so press early to take the next opening.\n\n" +
                 "<b>Dash</b>   SPACE or SHIFT · gamepad A · the DASH button on touch screens\n" +
                 "A short burst of speed with a cooldown. It's <color=#FF3D55>loud</color>: hunters nearby turn to look, and the Listener comes from anywhere.\n\n" +
                 "<b>Pause</b>   ESC or P · gamepad Start      <b>Restart</b>   R · gamepad Select\n\n" +
                 "<b>The rules</b>   Eat every <color=#40EBFF>energy node</color>, then reach the <b>EXIT</b>. A <color=#A866FF>violet core</color> sets off a power surge: the hunters flee, and catching them scores 200, 400, 800, 1600. " +
-                "<color=#FFB84D>Warning plates</color> mean walls are about to move. <color=#FF3D55>RISK</color> chambers hold big bonuses, but the door seals on a timer, so get out before it does.\n\n" +
+                "<color=#FFB84D>Warning plates</color> mean walls are about to move. <color=#FF3D55>RISK</color> chambers hold big bonuses, but the door seals on a timer, so get out before it does.\n" +
+                "<b>Bonus pills</b> appear for a while: <color=#40FF73>GO HOME</color> sends every hunter back to the pen for 10 s, <color=#8CE0FF>FREEZE</color> stops them, <color=#FFE033>SPEED</color> makes you faster, <color=#FF66D9>SHIELD</color> survives one catch.\n\n" +
                 "<b>The hunters</b>   <color=#FF2944>Stalker</color> chases you.  <color=#B84DFF>Ambusher</color> cuts you off at the next junction.  " +
                 "<color=#FFA833>Warden</color> guards cores, gems and the exit.  <color=#33FFB3>Listener</color> follows noise.",
-                27, UiKit.TextColour, UiKit.Bold, TextAnchor.UpperLeft);
+                24, UiKit.TextColour, UiKit.Bold, TextAnchor.UpperLeft);
             t.rectTransform.Fill();
             t.lineSpacing = 1.1f;
         }
@@ -377,6 +379,19 @@ namespace NeonHunger
             surgeText = UiKit.Label(surgeBar, "POWER SURGE", 24, UiKit.TextColour, UiKit.Title);
             surgeText.rectTransform.Fill();
 
+            // bonus pickup timers, stacked above the surge bar while they last
+            foreach (var kind in new[] { PowerUp.Home, PowerUp.Freeze, PowerUp.Speed, PowerUp.Shield })
+            {
+                var bar = UiKit.Rect(kind + " Timer", hud.transform).Place(new Vector2(0.5f, 0), new Vector2(0.5f, 0), new Vector2(-210, 0), new Vector2(210, 36));
+                var c = PickupView.Colour(kind);
+                var tk = UiKit.Box(bar, "Track", c * 0.22f + new Color(0, 0, 0, 0.78f), UiKit.RoundedSmall); tk.rectTransform.Fill();
+                var fill = UiKit.Box(tk.transform, "Fill", c * 0.75f + new Color(0, 0, 0, 0.25f), UiKit.RoundedSmall); fill.rectTransform.Fill();
+                var label = UiKit.Label(bar, PickupView.Name(kind), 20, UiKit.TextColour, UiKit.Title);
+                label.rectTransform.Fill();
+                bar.gameObject.SetActive(false);
+                powerBars.Add((kind, bar, fill, label));
+            }
+
             // hint banner
             hintBack = UiKit.Box(hud.transform, "Hint", new Color(0.02f, 0.02f, 0.06f, 0.85f), UiKit.Rounded);
             hintBack.rectTransform.Place(new Vector2(0.2f, 1), new Vector2(0.8f, 1), new Vector2(0, -196), new Vector2(0, -116));
@@ -483,6 +498,22 @@ namespace NeonHunger
                 bool ending = sim.SurgeEnding;
                 surgeFill.color = ending && !Settings.ReducedFlashing && Mathf.Repeat(Time.time * 5f, 1f) > 0.5f ? Color.white : UiKit.Purple;
                 surgeText.text = ending ? "SURGE ENDING!" : "POWER SURGE";
+            }
+            // bonus pickups
+            float y = sim.SurgeActive ? 84f : 30f;
+            foreach (var (kind, bar, fill, label) in powerBars)
+            {
+                float left = kind == PowerUp.Home ? sim.HomeLeft : kind == PowerUp.Freeze ? sim.FreezeLeft : kind == PowerUp.Speed ? sim.SpeedLeft : sim.Shielded ? 1f : 0f;
+                float full = kind == PowerUp.Home ? GameSim.HomeSeconds : kind == PowerUp.Freeze ? GameSim.FreezeSeconds : kind == PowerUp.Speed ? GameSim.SpeedSeconds : 1f;
+                bool on = left > 0f && g.Current != GameManager.Phase.Title;
+                bar.gameObject.SetActive(on);
+                if (!on) continue;
+                bar.anchoredPosition = new Vector2(0f, y + 18f);
+                y += 44f;
+                fill.rectTransform.anchorMax = new Vector2(Mathf.Clamp01(left / full), 1f);
+                bool ending = kind != PowerUp.Shield && left <= GameSim.PowerUpWarn;
+                fill.enabled = !(ending && !Settings.ReducedFlashing && Mathf.Repeat(Time.time * 5f, 1f) > 0.5f);
+                label.text = kind == PowerUp.Shield ? "SHIELD READY" : $"{PickupView.Name(kind)}  {Mathf.CeilToInt(left)}";
             }
             touchControls.SetActive(TouchMode && (g.Current == GameManager.Phase.Playing || g.Current == GameManager.Phase.Intro) && !g.Paused);
             UpdateThreats(g);

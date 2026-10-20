@@ -30,7 +30,7 @@ namespace NeonHunger
     /// </summary>
     public class PlayerView : MonoBehaviour
     {
-        Transform body, eyes, mouth, ring;
+        Transform body, eyes, mouth, ring, shield;
         Material bodyMat;
         Light glow;
         TrailRenderer trail;
@@ -81,6 +81,19 @@ namespace NeonHunger
             ActorKit.Part(ring, "Ring Mesh", rk);
             ring.gameObject.SetActive(false);
 
+            // shield pickup: two crossed hoops spinning round the creature
+            var shieldMat = new Material(art.Power);
+            var sc = PickupView.Colour(PowerUp.Shield);
+            shieldMat.SetColor(BaseId, sc); shieldMat.SetColor(EmissionId, sc * 1.8f);
+            shield = new GameObject("Shield").transform;
+            shield.SetParent(transform, false);
+            shield.localPosition = new Vector3(0, 0.38f, 0);
+            var sk = new MeshKit();
+            sk.Torus(shieldMat, Vector3.zero, new Vector3(0.5f, 1f, 0f).normalized, 0.56f, 0.022f, 40, 6);
+            sk.Torus(shieldMat, Vector3.zero, new Vector3(-0.5f, 1f, 0f).normalized, 0.56f, 0.022f, 40, 6);
+            ActorKit.Part(shield, "Shield Mesh", sk);
+            shield.gameObject.SetActive(false);
+
             glow = new GameObject("Glow").AddComponent<Light>();
             glow.transform.SetParent(transform, false);
             glow.transform.localPosition = new Vector3(0, 1.6f, 0);
@@ -126,8 +139,11 @@ namespace NeonHunger
             ring.gameObject.SetActive(surge);
             if (surge) ring.localRotation = Quaternion.Euler(0, Time.time * 240f, 0);
 
-            trail.emitting = sim.Dashing;
-            trail.colorGradient = Grad(c);
+            bool fast = sim.SpeedLeft > 0f;
+            trail.emitting = sim.Dashing || fast;
+            trail.colorGradient = Grad(fast && !sim.Dashing ? PickupView.Colour(PowerUp.Speed) : c);
+            shield.gameObject.SetActive(sim.Shielded && dying <= 0f);
+            if (sim.Shielded) shield.localRotation = Quaternion.Euler(0, Time.time * 160f, 0);
 
             // chomping, blinking, squash and stretch
             chomp = Mathf.MoveTowards(chomp, 0f, dt * 6f);
@@ -262,7 +278,8 @@ namespace NeonHunger
                 rig.localRotation = Quaternion.Slerp(rig.localRotation, ActorKit.Facing(mv.Facing), 1f - Mathf.Exp(-dt * 10f));
 
             bool eyesOnly = h.Mode == HunterMode.Returning;
-            bool fright = h.Mode == HunterMode.Fleeing;
+            bool frozen = sim.IsFrozen(h);
+            bool fright = h.Mode == HunterMode.Fleeing && !frozen;
             bool flicker = fright && sim.SurgeEnding && !Settings.ReducedFlashing && Mathf.Repeat(Time.time * 5f, 1f) > 0.5f;
             foreach (var r in bodyParts)
             {
@@ -274,28 +291,29 @@ namespace NeonHunger
                 r.sharedMaterials = mats;
             }
             var col = Art.HunterColour(Kind);
+            if (frozen) col = Color.Lerp(col, PickupView.Colour(PowerUp.Freeze), 0.75f);
             bodyMat.SetColor(EmissionId, col * (h.Mode == HunterMode.Hunting ? (h.Investigating ? 0.7f : 0.32f) : 0.15f));
             eyeMat.SetColor(BaseId, (fright ? new Color(0.85f, 0.9f, 1f) : Color.Lerp(col, Color.white, 0.35f)) * (h.Investigating ? 3.2f : 2.4f));
             if (glow)
             {
                 glow.enabled = !eyesOnly;
                 glow.color = fright ? new Color(0.3f, 0.45f, 1f) : col;
-                glow.intensity = h.Mode == HunterMode.Hunting ? 1.6f : 0.8f;
+                glow.intensity = frozen ? 0.9f : h.Mode == HunterMode.Hunting ? 1.6f : 0.8f;
             }
 
             // body language: hover, cower when frightened, lean in when hunting
-            float bob = Mathf.Sin(t * (fright ? 9f : 3f)) * (fright ? 0.05f : 0.04f);
+            float bob = frozen ? 0f : Mathf.Sin(t * (fright ? 9f : 3f)) * (fright ? 0.05f : 0.04f);
             rig.localPosition = new Vector3(0, (eyesOnly ? 0.25f : 0f) + bob, 0);
             float lean = h.Mode == HunterMode.Hunting && mv.Dir != Dir.None ? 8f : fright ? -12f : 0f;
             rig.localRotation = Quaternion.Euler(lean, rig.localRotation.eulerAngles.y, 0);
             rig.localScale = (fright ? new Vector3(1.05f, 0.85f, 1.05f) : Vector3.one) * 1.3f;
-            if (spinner) spinner.localRotation = Quaternion.Euler(0, Time.time * (h.Mode == HunterMode.Hunting ? 120f : 40f), 0);
+            if (spinner && !frozen) spinner.localRotation = Quaternion.Euler(0, Time.time * (h.Mode == HunterMode.Hunting ? 120f : 40f), 0);
             if (ears) ears.localRotation = Quaternion.Euler(h.Investigating ? Mathf.Sin(Time.time * 10f) * 25f : 0f, h.Investigating ? Mathf.Sin(Time.time * 3f) * 40f : 0f, 0);
 
             // voice: louder while hunting (and pitched up when investigating a noise)
             if (hum)
             {
-                float target = h.Mode == HunterMode.Hunting ? 0.55f : h.Mode == HunterMode.Fleeing ? 0.3f : h.Mode == HunterMode.Returning ? 0f : 0.15f;
+                float target = frozen ? 0.05f : h.Mode == HunterMode.Hunting ? 0.55f : h.Mode == HunterMode.Fleeing ? 0.3f : h.Mode == HunterMode.Returning ? 0f : 0.15f;
                 hum.volume = Mathf.MoveTowards(hum.volume, target * (Sfx.Instance ? Sfx.Instance.SoundVolume : 1f), dt * 2f);
                 hum.pitch = fright ? 0.7f : h.Investigating ? 1.25f : 1f;
             }

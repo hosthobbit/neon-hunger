@@ -10,7 +10,7 @@ namespace NeonHunger
     [RequireComponent(typeof(Camera))]
     public class CameraRig : MonoBehaviour
     {
-        public float Pitch = 58f;
+        public float Pitch = 66f;
         [Tooltip("Tiles of maze visible across a 16:9 screen.")] public float TilesAcross = 15f;
         public float LookAhead = 1.4f;
         public float Smooth = 5f;

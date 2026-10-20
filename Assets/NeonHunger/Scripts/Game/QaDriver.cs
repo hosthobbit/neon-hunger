@@ -99,6 +99,29 @@ namespace NeonHunger
             G.SetPaused(false);
         }
 
+        /// <summary>The bonus pills: one lying in the maze, then each effect just after it's taken.</summary>
+        IEnumerator PillShots()
+        {
+            var sim = G.Sim;
+            var field = sim.Maze.Distances(sim.Player.Tile, sim.Maze.PlayerCanEnter);
+            bool placed = false;
+            for (int r = 0; r < sim.Maze.Height && !placed; r++)
+                for (int c = 0; c < sim.Maze.Width && !placed; c++)
+                {
+                    var t = new Tile(c, r);
+                    if (sim.Maze.Dist(field, t) == 3 && sim.Maze.HunterCanEnter(t, false)) placed = sim.SpawnPickup(PowerUp.Home, t);
+                }
+            yield return new WaitForSecondsRealtime(0.3f);
+            yield return Shot("14_pill");
+            foreach (var (kind, name, wait) in new[] { (PowerUp.Freeze, "15_freeze", 0.8f), (PowerUp.Shield, "16_shield", 0.5f), (PowerUp.Home, "17_go_home", 1.2f) })
+            {
+                if (G.Sim != sim || sim.State != SimState.Playing) yield break;
+                sim.SpawnPickup(kind, sim.Player.Tile);
+                yield return new WaitForSecondsRealtime(wait);
+                yield return Shot(name);
+            }
+        }
+
         IEnumerator Shot(string name)
         {
             if (shotDir == null) yield break;
@@ -133,7 +156,7 @@ namespace NeonHunger
                 int errs0 = errors;
                 float t0 = Time.realtimeSinceStartup;
                 int surges = 0, caught = 0, shifts = 0, risks = 0, deaths = 0, levelsCleared = 0;
-                bool shotIntro = false, shotPlay = false, shotClose = false, shotSurge = false, shotShift = false, shotRisk = false, shotClear = false, shotLate = false;
+                bool shotIntro = false, shotPlay = false, shotClose = false, shotSurge = false, shotShift = false, shotRisk = false, shotClear = false, shotLate = false, shotPills = false;
                 Action<SimEvent> count = e =>
                 {
                     if (e.Kind == SimEventKind.SurgeStart) surges++;
@@ -154,6 +177,7 @@ namespace NeonHunger
                         if (!shotIntro && G.Current == GameManager.Phase.Intro && G.PhaseTime > 0.5f) { shotIntro = true; yield return Shot("04_level_intro"); }
                         if (!shotPlay && G.Current == GameManager.Phase.Playing && G.PhaseTime > 12f) { shotPlay = true; yield return Shot("05_gameplay"); }
                         if (!shotClose && G.Current == GameManager.Phase.Playing && G.PhaseTime > 18f && Array.TrueForAll(sim.Hunters, h => h.Mode == HunterMode.Hunting)) { shotClose = true; yield return CloseUps(); }
+                        if (!shotPills && shotClose && G.LevelIndex == 0 && G.Current == GameManager.Phase.Playing && sim.State == SimState.Playing && G.PhaseTime > 24f) { shotPills = true; yield return PillShots(); }
                         if (!shotSurge && sim.SurgeActive && sim.SurgeLeft < sim.Def.SurgeSeconds - 1f && Array.Exists(sim.Hunters, h => h.Mode == HunterMode.Fleeing)) { shotSurge = true; yield return Shot("06_power_surge"); }
                         if (!shotShift && sim.PendingShift != null && sim.ShiftTelegraphLeft < 1.8f) { shotShift = true; yield return Shot("07_walls_warning"); }
                         if (!shotRisk && Array.Exists(sim.Maze.RiskRooms.ToArray(), r => r.Entered && !r.Sealed && r.TimeLeft < sim.Def.RiskSeconds - 1f)) { shotRisk = true; yield return Shot("08_risk_room"); }
