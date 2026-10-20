@@ -1,0 +1,1 @@
+{ "name": "NeonHunger.Editor", "rootNamespace": "NeonHunger.EditorTools", "references": ["NeonHunger.Core", "NeonHunger.Runtime", "Unity.InputSystem", "UnityEngine.UI", "Unity.RenderPipelines.Universal.Runtime", "Unity.RenderPipelines.Core.Runtime"], "includePlatforms": ["Editor"] }

@@ -1,0 +1,48 @@
+# OPTIONAL custom Pages workflow (not active). The live site currently uses GitHub's built-in
+# branch deployment: Settings > Pages > "Deploy from a branch", main, /docs - which already runs a
+# GitHub Actions deployment on every push to main. To use this workflow instead:
+#   1. gh auth refresh -h github.com -s workflow    (pushing workflow files needs this token scope)
+#   2. move this file to .github/workflows/pages.yml and push
+#   3. Settings > Pages > Source: GitHub Actions
+#
+# Publishes the committed browser build (docs/) to GitHub Pages on every push to main.
+#
+# Why not build Unity here? Building Unity in Actions needs a Unity licence stored as repository
+# secrets (UNITY_LICENSE / UNITY_EMAIL / UNITY_PASSWORD, e.g. with game-ci/unity-builder). This
+# repository has none, so the WebGL build is made locally with ./publish-web.sh and committed.
+# Source changes therefore need ./publish-web.sh (and a commit of docs/) before they go live.
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check the committed build is present
+        run: |
+          test -f docs/index.html
+          ls docs/Build/*.loader.js docs/Build/*.wasm.unityweb docs/Build/*.data.unityweb docs/Build/*.framework.js.unityweb
+          grep -q "Build/" docs/index.html
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs
+      - id: deployment
+        uses: actions/deploy-pages@v4

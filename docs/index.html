@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en-gb">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+    <title>NEON HUNGER: play free in your browser</title>
+    <meta name="description" content="A dark 3D maze chase. Eat every energy node, outwit four hunters and escape a living arcade machine whose walls move around you. Free in your browser, with a public scoreboard. Developed by Host Hobbit.">
+    <meta property="og:type" content="website">
+    <meta property="og:title" content="NEON HUNGER: you're clearing the maze while the maze is trying to trap you.">
+    <meta property="og:description" content="A dark 3D maze chase with four hunters, moving walls and risky bonus rooms. Free in your browser, with a public scoreboard.">
+    <meta property="og:url" content="https://hosthobbit.github.io/neon-hunger/">
+    <meta property="og:image" content="https://hosthobbit.github.io/neon-hunger/og.jpg">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta name="twitter:card" content="summary_large_image">
+    <link rel="icon" type="image/png" href="favicon.png">
+    <link rel="manifest" href="manifest.webmanifest">
+    <link rel="apple-touch-icon" href="apple-touch-icon.png">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black">
+    <meta name="apple-mobile-web-app-title" content="NEON HUNGER">
+    <meta name="theme-color" content="#020308">
+    <style>
+      :root { --orange: #ff2a4a; --cyan: #40ebff; --purple: #a866ff; --ink: #020308; --text: #e6eeff; --muted: #8c99b8; }
+      html, body { margin: 0; height: 100%; background: var(--ink); color: var(--text); overflow: hidden;
+        font-family: system-ui, "Segoe UI", "Noto Sans", Roboto, sans-serif; }
+      #unity-canvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; background: var(--ink); outline: none;
+        touch-action: none; -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent; }
+      #loader { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px;
+        background: radial-gradient(ellipse at 50% 40%, #121a33 0%, var(--ink) 70%); text-align: center; padding: 16px; box-sizing: border-box; }
+      #loader h1 { margin: 0; font-size: clamp(42px, 8vw, 100px); letter-spacing: 0.08em; color: var(--cyan); font-weight: 900;
+        text-shadow: 0 0 24px rgba(64, 235, 255, 0.55), 3px 3px 0 rgba(255, 42, 74, 0.8); }
+      #loader .tag { color: var(--cyan); font-size: clamp(14px, 2vw, 21px); margin-top: -8px; }
+      #bar { width: min(520px, 80vw); height: 12px; border-radius: 6px; background: #10142a; overflow: hidden; box-shadow: 0 0 0 2px rgba(51, 224, 255, 0.45); }
+      #fill { height: 100%; width: 0%; background: linear-gradient(90deg, var(--orange), var(--purple), var(--cyan)); transition: width 0.15s; }
+      #status { font-size: 15px; color: var(--muted); min-height: 1.2em; }
+      #keys { background: rgba(8, 10, 22, 0.92); border: 1px solid rgba(64, 235, 255, 0.35); border-radius: 12px; padding: 12px 20px;
+        font-size: 15px; line-height: 1.75; text-align: left; max-width: 34em; }
+      #keys b { color: var(--cyan); font-weight: 600; display: inline-block; min-width: 8.5em; }
+      #keys .t { display: none; }
+      .touch #keys .m { display: none; }
+      .touch #keys .t { display: block; }
+      #credit { position: fixed; bottom: max(10px, env(safe-area-inset-bottom)); left: 0; right: 0; text-align: center; font-size: 13px; color: var(--muted); }
+      #credit a { color: var(--orange); text-decoration: none; }
+      #error { display: none; color: #ffc2bb; background: rgba(120, 0, 30, 0.45); border-radius: 8px; padding: 8px 14px; max-width: 40em; line-height: 1.6; }
+      #fullscreen { display: none; position: fixed; top: 50%; transform: translateY(-50%); left: max(4px, env(safe-area-inset-left)); z-index: 5; width: 36px; height: 36px; opacity: 0.75; border-radius: 10px;
+        border: 1px solid rgba(51, 224, 255, 0.6); background: rgba(8, 6, 26, 0.75); color: var(--cyan); font-size: 22px; line-height: 1; padding: 0; }
+    </style>
+  </head>
+  <body>
+    <canvas id="unity-canvas" tabindex="-1"></canvas>
+    <div id="loader">
+      <h1>NEON HUNGER</h1>
+      <div class="tag">You're clearing the maze while the maze is trying to trap you.</div>
+      <div id="bar"><div id="fill"></div></div>
+      <div id="status">Loading…</div>
+      <div id="keys">
+        <div class="m"><b>Steer</b>WASD or arrow keys (gamepad works too)</div>
+        <div class="m"><b>Dash</b>SPACE or SHIFT (loud!)</div>
+        <div class="m"><b>Pause / restart</b>ESC or P / R</div>
+        <div class="t"><b>Steer</b>swipe in any direction</div>
+        <div class="t"><b>Dash</b>the DASH button (loud!)</div>
+        <div><b>Sound</b>starts after your first click, tap or key press. Headphones recommended.</div>
+      </div>
+      <div id="error"></div>
+    </div>
+    <button id="fullscreen" aria-label="Full screen" title="Full screen">⛶</button>
+    <div id="credit">Developed by <a href="https://hosthobbit.com" target="_blank" rel="noopener">Host Hobbit</a> · hosthobbit.com</div>
+    <script>
+      var canvas = document.querySelector("#unity-canvas");
+      var mobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent) || (navigator.maxTouchPoints > 1 && /Macintosh/.test(navigator.userAgent));
+      if (mobile) document.body.classList.add("touch");
+
+      function fail(msg) {
+        var e = document.getElementById("error");
+        e.style.display = "block";
+        e.textContent = "Sorry, NEON HUNGER couldn't start in this browser: " + msg + " Try an up-to-date Chrome, Edge, Firefox or Safari.";
+        document.getElementById("status").textContent = "";
+      }
+
+      // explain the common failure cases up front
+      if (location.protocol === "file:") { fail("it was opened as a local file. Serve the folder over http (for example: python3 -m http.server)."); }
+      if (!document.createElement("canvas").getContext("webgl2")) { fail("WebGL 2 isn't available (check that hardware acceleration is enabled)."); }
+      var script = document.createElement("script");
+      script.src = "Build/069c6256025ce5ceed1d52ca017d83db.loader.js";
+      script.onerror = function () { fail("the loader didn't download."); };
+      script.onload = function () {
+        createUnityInstance(canvas, {
+          arguments: [],
+          dataUrl: "Build/71af2a6cee5c89292dce7d0e942ca132.data.unityweb",
+          frameworkUrl: "Build/a14c5eba52a3c49b1412f6b439fe7b14.framework.js.unityweb",
+          codeUrl: "Build/bb9eaf8b6eeebc33fde1a1b55635f96a.wasm.unityweb",
+          streamingAssetsUrl: "StreamingAssets",
+          companyName: "Host Hobbit",
+          productName: "NEON HUNGER",
+          productVersion: "1.0",
+          // phones: cap the pixel ratio so high-DPI screens stay smooth
+          devicePixelRatio: mobile ? Math.min(window.devicePixelRatio || 1, 1.5) : Math.min(window.devicePixelRatio || 1, 1.25),
+        }, function (p) {
+          document.getElementById("fill").style.width = Math.round(p * 100) + "%";
+          document.getElementById("status").textContent = p < 0.9 ? "Loading… " + Math.round(p * 100) + "%" : "Waking the machine…";
+        }).then(function (instance) {
+          window.unityInstance = instance;
+          document.getElementById("loader").style.display = "none";
+          document.getElementById("credit").style.display = "none";
+          canvas.focus();
+          canvas.addEventListener("pointerdown", function () { canvas.focus(); });
+        }).catch(function (message) { fail(String(message)); });
+      };
+      document.body.appendChild(script);
+
+      // touch devices: a small full-screen button
+      var canFull = !!(document.documentElement.requestFullscreen || document.documentElement.webkitRequestFullscreen);
+      if (mobile && canFull && !window.navigator.standalone && !matchMedia("(display-mode: fullscreen)").matches) {
+        var fsBtn = document.getElementById("fullscreen");
+        fsBtn.style.display = "block";
+        document.addEventListener("fullscreenchange", function () { fsBtn.style.display = document.fullscreenElement ? "none" : "block"; });
+        fsBtn.addEventListener("click", function () {
+          var el = document.documentElement, req = el.requestFullscreen || el.webkitRequestFullscreen;
+          try { var p = req.call(el); if (p && p.catch) p.catch(function () {}); } catch (e) {}
+        });
+      }
+    </script>
+  </body>
+</html>

@@ -1,0 +1,1 @@
+{ "name": "NeonHunger.Runtime", "rootNamespace": "NeonHunger", "references": ["NeonHunger.Core", "Unity.InputSystem", "UnityEngine.UI", "Unity.RenderPipelines.Universal.Runtime", "Unity.RenderPipelines.Core.Runtime"], "autoReferenced": true }
